@@ -1,0 +1,163 @@
+#cloud-config
+coreos:
+  update:
+    reboot-strategy: "off"
+  units:
+    - name: update-engine.service
+      command: stop
+    - name: locksmithd.service
+      command: stop
+    - name: docker.service
+      drop-ins:
+        - name: 50-docker-opts.conf
+          content: |
+            [Service]
+            Environment='DOCKER_OPTS=--bridge=cbr0 --iptables=false --ip-masq=false'
+            MountFlags=slave
+            LimitNOFILE=1048576
+            LimitNPROC=1048576
+            LimitCORE=infinity
+            Restart=always
+            RestartSec=2s
+            StartLimitInterval=0
+
+    - name: kubelet.service
+      command: start
+      content: |
+        [Unit]
+        After=install-kubernetes.service
+        ConditionFileIsExecutable=/opt/kubernetes/server/bin/kubelet
+        Description=Kubernetes Kubelet
+        Wants=install-kubernetes.service
+        [Service]
+        ExecStartPre=/bin/mkdir -p /etc/kubernetes/manifests/
+        ExecStart=/opt/kubernetes/server/bin/kubelet \
+            --api-servers=https://${masterPrivateIp}:6443 \
+            --register-node=true \
+            --allow-privileged=true \
+            --configure-cbr0=true \
+            --reconcile-cidr=false \
+            --pod-cidr=${kubePodCidr} \
+            --container-runtime=docker \
+            --config=/etc/kubernetes/manifests \
+            --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml \
+            --cluster-dns=${kubeDnsServiceIP} \
+            --cluster-domain=cluster.local \
+            --tls-cert-file=/etc/kubernetes/ssl/client.crt \
+            --tls-private-key-file=/etc/kubernetes/ssl/client.key \
+            --logtostderr=true
+        Restart=always
+        RestartSec=10
+        [Install]
+        WantedBy=multi-user.target
+        
+    - name: install-kubernetes.service
+      command: start
+      content: |
+        [Unit]
+        After=network-online.target
+        Before=kubelet.service
+        Description=Download Kubernetes Binaries
+        Documentation=http://kubernetes.io/
+        Requires=network-online.target
+        [Service]
+        Environment=KUBE_RELEASE_TARBALL=https://storage.googleapis.com/kubernetes-release/release/${k8sVer}/kubernetes.tar.gz
+        ExecStartPre=/bin/mkdir -p /opt/
+        ExecStart=/opt/bin/curl-retry.sh --silent --location $KUBE_RELEASE_TARBALL --output /tmp/kubernetes.tgz
+        ExecStart=/bin/tar xzvf /tmp/kubernetes.tgz -C /tmp/
+        ExecStart=/bin/tar xzvf /tmp/kubernetes/server/kubernetes-server-linux-amd64.tar.gz -C /opt --overwrite
+        ExecStartPost=/bin/chmod o+rx -R /opt/kubernetes
+        ExecStartPost=/bin/ln -sf /opt/kubernetes/server/bin/kubectl /opt/bin/
+        ExecStartPost=/bin/rm -rf /tmp/kubernetes
+        RemainAfterExit=yes
+        Type=oneshot
+        [Install]
+        WantedBy=kubelet.service
+
+write_files:
+  - path: /etc/kubernetes/manifests/kube-proxy.yaml
+    content: |
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: kube-proxy
+          namespace: kube-system
+        spec:
+          hostNetwork: true
+          containers:
+          - name: kube-proxy
+            image: ${hyperkubeImage}
+            command:
+            - /hyperkube
+            - proxy
+            - --master=https://${masterPrivateIp}:6443
+            - --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml
+            - --proxy-mode=iptables
+            securityContext:
+              privileged: true
+            volumeMounts:
+              - mountPath: /etc/ssl/certs
+                name: "ssl-certs"
+              - mountPath: /etc/kubernetes/worker-kubeconfig.yaml
+                name: "kubeconfig"
+                readOnly: true
+              - mountPath: /etc/kubernetes/ssl
+                name: "etc-kube-ssl"
+                readOnly: true
+          volumes:
+            - name: "ssl-certs"
+              hostPath:
+                path: "/usr/share/ca-certificates"
+            - name: "kubeconfig"
+              hostPath:
+                path: "/etc/kubernetes/worker-kubeconfig.yaml"
+            - name: "etc-kube-ssl"
+              hostPath:
+                path: "/etc/kubernetes/ssl"
+
+  - path: /etc/kubernetes/worker-kubeconfig.yaml
+    content: |
+        apiVersion: v1
+        kind: Config
+        clusters:
+        - name: local
+          cluster:
+            certificate-authority: /etc/kubernetes/ssl/ca.pem
+        users:
+        - name: kubelet
+          user:
+            client-certificate: /etc/kubernetes/ssl/client.crt
+            client-key: /etc/kubernetes/ssl/client.key
+        contexts:
+        - context:
+            cluster: local
+            user: kubelet
+          name: kubelet-context
+        current-context: kubelet-context
+
+  - path: /etc/kubernetes/ssl/ca.pem
+    permissions: "0644"
+    encoding: "base64"
+    owner: "root"
+    content: |
+      ${caCertificate}
+  - path: /etc/kubernetes/ssl/client.crt
+    permissions: "0644"
+    encoding: "base64"
+    owner: "root"
+    content: |
+      ${clientCertificate}
+  - path: /etc/kubernetes/ssl/client.key
+    permissions: "0644"
+    encoding: "base64"
+    owner: "root"
+    content: |
+      ${clientPrivateKey}
+  - path: /opt/bin/curl-retry.sh
+    permissions: '0755'
+    owner: root
+    content: |
+      #!/bin/sh -x
+      until curl $@
+      do sleep 1
+      done      

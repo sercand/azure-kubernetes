@@ -1,0 +1,68 @@
+#!/bin/bash
+
+clusterenv="cluster"
+
+if [ ! -d "$clusterenv" ];then
+    mkdir "$clusterenv"
+fi
+
+MASTER_SIZE="Standard_D1_v2"
+NODE_SIZE="Standard_D1_v2"
+
+source ${clusterenv}/creds.sh
+
+#Terraform variables
+export TF_VAR_location=$AZURE_LOCATION
+export TF_VAR_mastersize=$MASTER_SIZE
+export TF_VAR_nodesize=$NODE_SIZE
+export TF_VAR_deployid=$AZURE_DEPLOY_ID
+export TF_VAR_masterfqdn=$MASTER_FQDN
+export TF_VAR_masterPrivateIP=$MASTER_PRIVATE_IP
+export TF_VAR_username=$ADMIN_USER_NAME
+
+export TF_VAR_tenantId=$ARM_TENANT_ID
+export TF_VAR_subscriptionId=$ARM_SUBSCRIPTION_ID
+export TF_VAR_azureClientId=$ARM_CLIENT_ID
+export TF_VAR_azureClientSecret=$ARM_CLIENT_SECRET
+export TF_VAR_secretPath="${clusterenv}/secret"
+
+terraformStatePath="${clusterenv}/terraform.tfstate"
+terraformOpts="-state=${terraformStatePath}"
+
+echo terraform options ${terraformOpts}
+echo node vm count $TF_VAR_nodecount
+echo master vm size $TF_VAR_mastersize
+echo node vm size $TF_VAR_nodesize
+
+if [ ! -d "$TF_VAR_secretPath" ];then
+    mkdir -p "$TF_VAR_secretPath"
+fi
+
+export PRIVATE_KEY_FILE="$TF_VAR_secretPath/${ADMIN_USER_NAME}_rsa"
+
+if [ ! -f "$PRIVATE_KEY_FILE" ];then
+    export SECRET_PATH=$TF_VAR_secretPath
+    go run pki.go
+else
+    echo private key file "$PRIVATE_KEY_FILE" is found not creating again
+fi
+
+
+if [ "$1" = "env" ]; then
+    echo "#env variables set"
+
+elif [ "$1" = "apply" ]; then
+    terraform apply "${terraformOpts}"
+    cp util.sh "${clusterenv}/util.sh"
+
+cat << EOF > "${clusterenv}/env.sh"
+#!/bin/bash
+AZURE_DEPLOY_ID="$AZURE_DEPLOY_ID"
+MASTER_FQDN="$MASTER_FQDN"
+ADMIN_USER_NAME="$ADMIN_USER_NAME"
+
+EOF
+
+else
+    terraform "$1" "${terraformOpts}"
+fi
