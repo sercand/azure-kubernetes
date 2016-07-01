@@ -55,6 +55,7 @@ resource "azurerm_subnet" "master_bridge" {
   virtual_network_name      = "${azurerm_virtual_network.az_kube.name}"
   network_security_group_id = "${azurerm_network_security_group.az_kube.id}"
   address_prefix            = "${var.podIpPrefix}.0.0/24"
+  route_table_id            = "${azurerm_route_table.az_kube.id}"
 }
 
 resource "azurerm_route" "master_route" {

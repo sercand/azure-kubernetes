@@ -67,11 +67,11 @@ resource "azurerm_subnet" "az_kube_vm" {
   virtual_network_name      = "${azurerm_virtual_network.az_kube.name}"
   network_security_group_id = "${azurerm_network_security_group.az_kube.id}"
   address_prefix            = "${var.vmCidr}"
+  route_table_id            = "${azurerm_route_table.az_kube.id}"
 }
 
 resource "azurerm_route_table" "az_kube" {
   name                = "${var.deployid}-route-table"
   location            = "${var.location}"
   resource_group_name = "${azurerm_resource_group.az_kube.name}"
- # subnets = ["${split(",", join(",", azurerm_subnet.node_bridge.*.id))}"]
 }

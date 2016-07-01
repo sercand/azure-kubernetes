@@ -3,8 +3,7 @@ Kubernetes deployment on Azure with cbr0 bridge network
 Basic setup with terraform to provision Kubernetes on Azure. These scripts provision a cluster with a master and 3 nodes. 
 Also it creates a subnet for each vm than adds a route to route-table. Kubelet will create cbr0 bridge with that associated subnet.
 Since kubernetes does not support azure cloud provider, kubelet runs at each node with --pod-cidr=${kubePodCidr}. 
-kubePodCidr is the address space of the subnet that we routed. There is only one problem which is terraform does not add subnets to 
-route-table (or I could not make it). So this must be handled manually.
+kubePodCidr is the address space of the subnet that we routed.
 
 ## Prerequisites
 - Terraform >= v0.7.0-rc2
@@ -33,9 +32,4 @@ After the provision initialize kubectl config with following script
 
     cd cluster
     ./util init
-    
-# WARNING
-You need to associate each subnet to created route-table, terraform unable to do that I think.
-
-
 
